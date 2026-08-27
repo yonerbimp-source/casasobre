@@ -88,6 +88,74 @@ function renderMonthlyPayments(){const ps=[...(state.monthlyPayments||[])].sort(
 function monthlyDayPicker(initialDays=[]){let days=normalizeDueDays(initialDays,1);const draw=()=>{const box=$('#monthlyDayChips');if(!box)return;box.innerHTML=days.map(d=>`<span class="day-chip">Día ${d}<button type="button" data-remove-day="${d}" aria-label="Eliminar día ${d}">×</button></span>`).join('');box.querySelectorAll('[data-remove-day]').forEach(b=>b.onclick=()=>{days=days.filter(x=>x!==Number(b.dataset.removeDay));draw()})};const add=()=>{const input=$('#monthlyDayInput'),d=Math.floor(Number(input.value));if(!(d>=1&&d<=31)){alert('Escribe un día entre 1 y 31.');return}if(!days.includes(d))days.push(d);days.sort((a,b)=>a-b);input.value='';draw();input.focus()};$('#addMonthlyDay').onclick=add;$('#monthlyDayInput').onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();add()}};draw();return()=>[...days]}
 function newMonthlyPayment(){showModal(`<h3>Nuevo pago mensual</h3><form id="monthlyForm" class="form-grid"><div class="field"><label>Nombre</label><input name="name" placeholder="Ej. Electricidad" required></div><div class="field"><label>Monto</label><input name="amount" type="number" min="0.01" step="0.01" required></div><div class="field"><label>Moneda</label><select name="currency"><option value="DOP">RD$</option><option value="USD">US$</option></select></div><div class="field"><label>Primera fecha de pago</label><input name="dueDate" type="date" required></div><div class="field"><label>Días de pago de cada mes</label><div class="day-picker"><div class="field"><input id="monthlyDayInput" type="number" inputmode="numeric" min="1" max="31" placeholder="Ej. 5"></div><button type="button" class="btn soft" id="addMonthlyDay">Agregar día</button></div><div id="monthlyDayChips" class="day-chips"></div><small class="muted">Agrega cada día por separado. Ejemplo: 5, luego 10, luego 30.</small></div><div class="field"><label>Nota o descripción (opcional)</label><input name="note"></div><div class="modal-actions"><button type="button" class="btn soft" data-close>Cancelar</button><button class="btn green">Crear pago</button></div></form>`);const getDays=monthlyDayPicker([]);$('#monthlyForm').onsubmit=async ev=>{ev.preventDefault();const fd=new FormData(ev.currentTarget),dueDate=String(fd.get('dueDate')),amount=Number(fd.get('amount')),chosen=getDays(),fallback=Number(dueDate.slice(8,10));const dueDays=chosen.length?normalizeDueDays(chosen,fallback):normalizeDueDays([],fallback);if(!(amount>0)||!dueDate)return;state.monthlyPayments.push({id:uid(),name:String(fd.get('name')).trim(),amount,currency:fd.get('currency'),dueDate,dueDays,billingDay:dueDays[0],note:String(fd.get('note')||''),createdAt:now()});await save();$('#modal').close()}}
 function editMonthlyPayment(p){showModal(`<h3>Editar pago mensual</h3><form id="monthlyEditForm" class="form-grid"><div class="field"><label>Nombre</label><input name="name" value="${esc(p.name)}" required></div><div class="field"><label>Monto del próximo pago</label><input name="amount" type="number" min="0.01" step="0.01" value="${Number(p.amount)}" required></div><div class="field"><label>Moneda</label><select name="currency"><option value="DOP" ${p.currency==='DOP'?'selected':''}>RD$</option><option value="USD" ${p.currency==='USD'?'selected':''}>US$</option></select></div><div class="field"><label>Próxima fecha de pago</label><input name="dueDate" type="date" value="${p.dueDate}" required></div><div class="field"><label>Días de pago de cada mes</label><div class="day-picker"><div class="field"><input id="monthlyDayInput" type="number" inputmode="numeric" min="1" max="31" placeholder="Ej. 15"></div><button type="button" class="btn soft" id="addMonthlyDay">Agregar día</button></div><div id="monthlyDayChips" class="day-chips"></div><small class="muted">Toca × para quitar un día o agrega uno nuevo.</small></div><div class="field"><label>Nota o descripción (opcional)</label><input name="note" value="${esc(p.note||'')}"></div><div class="modal-actions"><button type="button" class="btn danger" id="deleteMonthly">Eliminar</button><button type="button" class="btn soft" data-close>Cancelar</button><button class="btn">Guardar</button></div></form>`);const getDays=monthlyDayPicker(normalizeDueDays(p.dueDays,p.billingDay||String(p.dueDate||'').slice(8,10)));$('#monthlyEditForm').onsubmit=async ev=>{ev.preventDefault();const fd=new FormData(ev.currentTarget),d=String(fd.get('dueDate')),a=Number(fd.get('amount')),chosen=getDays(),fallback=Number(d.slice(8,10)),dueDays=chosen.length?normalizeDueDays(chosen,fallback):normalizeDueDays([],fallback);if(!(a>0)||!d)return;p.name=String(fd.get('name')).trim();p.amount=a;p.currency=fd.get('currency');p.dueDate=d;p.dueDays=dueDays;p.billingDay=dueDays[0];p.note=String(fd.get('note')||'');await save();$('#modal').close()};$('#deleteMonthly').onclick=async()=>{if((state.monthlyPaymentTransactions||[]).some(t=>t.paymentId===p.id)){if(!confirm('Este pago tiene historial. Eliminarlo quitará el pago pendiente, pero conservará sus registros históricos. ¿Deseas continuar?'))return}else if(!confirm('¿Seguro que deseas eliminar este pago mensual?'))return;state.monthlyPayments=state.monthlyPayments.filter(x=>x.id!==p.id);await save();$('#modal').close()}}
+function payMonthlyPayment(p){
+  showModal(`<h3>Pagar / transferir · ${esc(p.name)}</h3><form id="monthlyPayForm" class="form-grid">
+    <div class="field"><label>Monto a pagar</label><input name="amount" type="number" min="0.01" step="0.01" value="${Number(p.amount)}" required></div>
+    <div class="field"><label>Moneda</label><select name="currency"><option value="DOP" ${p.currency==='DOP'?'selected':''}>RD$</option><option value="USD" ${p.currency==='USD'?'selected':''}>US$</option></select></div>
+    <div class="field"><label>El dinero sale de</label><select name="source">${monthlySourceOptions('available')}</select></div>
+    <div class="field"><label>Fecha del pago</label><input name="date" type="date" value="${today()}" required></div>
+    <div class="field"><label>Nota o descripción (opcional)</label><input name="note" value="${esc(p.note||'')}"></div>
+    <div class="card" style="padding:12px"><div class="muted">Este pago corresponde a</div><strong>${dateDO(parseLocalDate(p.dueDate))}</strong></div>
+    <div class="modal-actions"><button type="button" class="btn soft" data-close>Cancelar</button><button class="btn green">Registrar pago</button></div>
+  </form>`);
+  $('#monthlyPayForm').onsubmit=async ev=>{
+    ev.preventDefault();
+    const fd=new FormData(ev.currentTarget),amount=Number(fd.get('amount')),currency=String(fd.get('currency')),sourceKey=String(fd.get('source')),date=String(fd.get('date'))+'T12:00:00.000Z';
+    if(!(amount>0))return alert('Escribe un monto válido.');
+    const ch=chargeMonthlySource(sourceKey,amount,currency);
+    if(!ch.ok)return alert(ch.message);
+    const paidDueDate=p.dueDate;
+    state.monthlyPaymentTransactions.push({id:uid(),paymentId:p.id,type:'payment',amount,currency,dueDatePaid:paidDueDate,sourceKey,source:monthlySourceName(sourceKey),sourceDebit:ch.debit,date,note:String(fd.get('note')||''),distributionId:null});
+    p.dueDate=nextMonthlyDueDate(paidDueDate,p.dueDays);
+    await save();
+    $('#modal').close();
+  };
+}
+function monthlyHistory(p){
+  const tx=(state.monthlyPaymentTransactions||[]).filter(t=>t.paymentId===p.id).sort((a,b)=>String(b.date).localeCompare(String(a.date)));
+  showModal(`<h3>${esc(p.name)} · Historial</h3>${tx.length?`<div class="card">${tx.map(t=>`<div class="history-item"><div><strong class="positive">✓ Pagado ${fmt(t.amount,t.currency)}</strong><span class="muted">${t.date.slice(0,10)}${t.dueDatePaid?' · Correspondía a '+t.dueDatePaid:''}${t.source?' · Desde '+esc(t.source):''}${t.note?' · '+esc(t.note):''}</span>${t.distributionId?'<div class="submoney">Pago realizado dentro de una distribución</div>':`<div class="row-actions"><button class="mini" data-monthtx-edit="${t.id}">Editar</button><button class="mini" style="color:var(--danger)" data-monthtx-delete="${t.id}">Eliminar</button></div>`}</div></div>`).join('')}</div>`:'<div class="empty">Todavía no hay pagos registrados.</div>'}<div class="modal-actions"><button class="btn soft" data-close>Cerrar</button></div>`);
+  document.querySelectorAll('[data-monthtx-edit]').forEach(b=>b.onclick=()=>editMonthlyTransaction(p,b.dataset.monthtxEdit));
+  document.querySelectorAll('[data-monthtx-delete]').forEach(b=>b.onclick=()=>deleteMonthlyTransaction(p,b.dataset.monthtxDelete));
+}
+function editMonthlyTransaction(p,id){
+  const t=(state.monthlyPaymentTransactions||[]).find(x=>x.id===id);if(!t)return;
+  if(t.distributionId){alert('Este pago fue creado dentro de una distribución. Para mantener las cuentas cuadradas, no se puede editar por separado.');return}
+  showModal(`<h3>Editar pago · ${esc(p.name)}</h3><form id="monthlyTxEditForm" class="form-grid">
+    <div class="field"><label>Monto pagado</label><input name="amount" type="number" min="0.01" step="0.01" value="${Number(t.amount)}" required></div>
+    <div class="field"><label>Moneda</label><select name="currency"><option value="DOP" ${t.currency==='DOP'?'selected':''}>RD$</option><option value="USD" ${t.currency==='USD'?'selected':''}>US$</option></select></div>
+    <div class="field"><label>El dinero salió de</label><select name="source">${monthlySourceOptions(t.sourceKey||'other')}</select></div>
+    <div class="field"><label>Fecha del pago</label><input name="date" type="date" value="${String(t.date).slice(0,10)}" required></div>
+    <div class="field"><label>Nota o descripción (opcional)</label><input name="note" value="${esc(t.note||'')}"></div>
+    <div class="modal-actions"><button type="button" class="btn soft" data-close>Cancelar</button><button class="btn">Guardar cambios</button></div>
+  </form>`);
+  $('#monthlyTxEditForm').onsubmit=async ev=>{
+    ev.preventDefault();
+    const fd=new FormData(ev.currentTarget),amount=Number(fd.get('amount')),currency=String(fd.get('currency')),sourceKey=String(fd.get('source')),date=String(fd.get('date'))+'T12:00:00.000Z';
+    if(!(amount>0))return alert('Escribe un monto válido.');
+    const old={amount:t.amount,currency:t.currency,sourceKey:t.sourceKey,source:t.source,sourceDebit:t.sourceDebit,date:t.date,note:t.note};
+    restoreMonthlySource(t);
+    const ch=chargeMonthlySource(sourceKey,amount,currency);
+    if(!ch.ok){
+      const rollback=chargeMonthlySource(old.sourceKey||'other',Number(old.amount)||0,old.currency||p.currency);
+      if(rollback.ok){t.sourceDebit=rollback.debit;}
+      return alert(ch.message);
+    }
+    t.amount=amount;t.currency=currency;t.sourceKey=sourceKey;t.source=monthlySourceName(sourceKey);t.sourceDebit=ch.debit;t.date=date;t.note=String(fd.get('note')||'');
+    await save();$('#modal').close();
+  };
+}
+async function deleteMonthlyTransaction(p,id){
+  const t=(state.monthlyPaymentTransactions||[]).find(x=>x.id===id);if(!t)return;
+  if(t.distributionId){alert('Este pago fue creado dentro de una distribución. Para mantener las cuentas cuadradas, no se puede eliminar por separado.');return}
+  if(!confirm('¿Seguro que deseas eliminar este pago? El dinero volverá al lugar de donde salió.'))return;
+  const others=(state.monthlyPaymentTransactions||[]).filter(x=>x.paymentId===p.id&&x.id!==id);
+  const latest=[...others,t].sort((a,b)=>String(b.dueDatePaid||b.date).localeCompare(String(a.dueDatePaid||a.date)))[0];
+  restoreMonthlySource(t);
+  state.monthlyPaymentTransactions=state.monthlyPaymentTransactions.filter(x=>x.id!==id);
+  if(latest&&latest.id===t.id&&t.dueDatePaid){const expected=nextMonthlyDueDate(t.dueDatePaid,p.dueDays);if(p.dueDate===expected)p.dueDate=t.dueDatePaid;}
+  await save();$('#modal').close();monthlyHistory(p);
+}
+
 function handleMonthlyPayment(act,id){const p=(state.monthlyPayments||[]).find(x=>x.id===id);if(!p)return;if(act==='pay')payMonthlyPayment(p);if(act==='history')monthlyHistory(p);if(act==='edit')editMonthlyPayment(p)}
 function renderAvailable(){const tx=state.transactions.filter(t=>t.accountType==='available').sort((a,b)=>b.date.localeCompare(a.date));$('#view').innerHTML=`<div class="section-title"><h2>Disponible</h2></div><div class="card"><div class="money">${eqPair(state.available)}</div><div class="row-actions"><button class="mini" id="availAdd">+ Agregar</button><button class="mini" id="availExpense">− Gasto</button></div></div>${historyHTML(tx)}`;$('#availAdd').onclick=()=>moneyModal('available',null,'add');$('#availExpense').onclick=()=>moneyModal('available',null,'expense');bindManualTransactionButtons()}
 function renderIncome(){const xs=[...state.incomes].sort((a,b)=>b.date.localeCompare(a.date));$('#view').innerHTML=`<div class="section-title"><h2>Entradas generales</h2></div>${xs.length?`<div class="grid">${xs.map(x=>{const used=incomeUsedDOP(x.id),total=incomeDOP(x),status=used<=0.005?'🟡 Pendiente de distribuir':'🟢 Distribuida';return `<article class="card"><div class="history-item"><div><strong>${fmt(x.amount,x.currency)}</strong><span class="muted">${x.date.slice(0,10)}${x.note?' · '+esc(x.note):''}</span><div class="submoney">${status}</div></div></div><div class="row-actions"><button class="mini" data-income-edit="${x.id}">Editar</button><button class="mini" style="color:var(--danger)" data-income-delete="${x.id}">Eliminar</button></div></article>`}).join('')}</div>`:'<div class="empty">Todavía no hay entradas.</div>'}`;document.querySelectorAll('[data-income-edit]').forEach(b=>b.onclick=()=>editIncome(b.dataset.incomeEdit));document.querySelectorAll('[data-income-delete]').forEach(b=>b.onclick=()=>deleteIncome(b.dataset.incomeDelete))}
